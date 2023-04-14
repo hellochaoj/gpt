@@ -1,0 +1,349 @@
+---
+title: "DSA8003 - Chapter 4 Clustering"
+output: 
+  html_notebook:
+    toc: true
+    toc_float: true
+---
+
+```{r setup=FALSE}
+if(!require(klaR)) install.packages("klaR")
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(skimr)) install.packages("skimr")
+if(!require(FactoMineR)) install.packages("FactoMineR")
+if(!require(factoextra)) install.packages("factoextra")
+if(!require(mlbench)) install.packages("mlbench") # contains various datasets
+if(!require(ISLR)) install.packages("ISLR") # contains various datasets
+if(!require(caret)) install.packages("caret")
+if(!require(caretEnsemble)) install.packages("caretEnsemble")
+if(!require(RANN)) install.packages("RANN")
+if(!require(rpart)) install.packages("rpart")
+if(!require(ranger)) install.packages("ranger")
+if(!require(e1071)) install.packages("e1071")
+if(!require(arules)) install.packages("arules")
+if(!require(arulesViz)) install.packages("arulesViz")
+if(!require(mice)) install.packages("mice")
+if(!require(NbClust)) install.packages("NbClust")
+
+library(klaR) # used for Naive-Bayes. Must be called before tidyverse, otherwise it masks `select` method
+library(tidyverse)
+library(skimr)
+library(FactoMineR)
+library(factoextra)
+library(mlbench)
+library(caret)
+library(caretEnsemble)
+library(RANN)
+library(rpart)
+library(ranger)
+library(e1071)
+library(arules)
+library(arulesViz)
+library(mice)
+library(NbClust)
+```
+
+
+# Unsupervised Learning 
+
+This famous (Fisher's or Anderson's) iris data set gives the measurements in centimeters of the variables sepal length and width and petal length and width, respectively, for 150 flowers from each of 3 species of iris. The species are Iris setosa, versicolor, and virginica.
+
+Assuming we do not know anything about iris species, we want to perform cluster analysis on this dataset in order to uncover subgroups of observations within a dataset.
+
+## Hierarchical Clustering
+
+```{r}
+set.seed(123)
+
+# Inspect the original dataset
+head(iris)
+skim(iris)
+```
+
+```{r}
+set.seed(123)
+
+# Before performing clustering we need to make sure that 
+# all the variables are on the same scale
+
+iris_cluster_df <- iris
+
+# Select all columns except `Species`. 
+iris_cluster_df<- iris[, 1:4] 
+# `Species` column will be used to interpret clustering results (see the last step).
+
+# Perform data normalisation (centering and scaling)
+iris_cluster_df<-scale(iris_cluster_df) 
+
+skim(iris_cluster_df)
+```
+
+```{r}
+set.seed(123)
+
+# Compute the distance matrix
+res_dist <- dist(iris_cluster_df, method = "euclidean") # method: "euclidean", "manhattan", "minkowski", etc.
+
+# Quick inspection of distance matrix
+head(as.matrix(res_dist))
+```
+
+```{r}
+set.seed(123)
+
+# Linkage
+res_hc <- hclust(d = res_dist, method = "ward.D2") # method: "single", "complete", "average", "centroid"
+
+# Dendogram
+fviz_dend(res_hc, cex = 0.5)
+```
+
+
+```{r}
+set.seed(123)
+
+# Automatically detect optimal number of clusters using NbClust method
+# NbClust package provides 30 indices for determining the number of clusters 
+# and proposes to user the best clustering scheme from the different results obtained by 
+# varying all combinations of number of clusters, distance measures, and clustering methods.
+res_hc_automatic <- iris_cluster_df %>% 
+  NbClust(distance = "euclidean", # NOTE: this needs to be the same metric as the one specified for res_dist object
+          min.nc = 2, max.nc = 10, 
+          method = "ward.D2", # NOTE: this needs to be the same metric as the one specified for res_hc object
+          index ="all") 
+
+
+fviz_nbclust(res_hc_automatic, ggtheme = theme_minimal())
+```
+
+
+```{r}
+set.seed(123)
+
+# We can see that 10 algorithms proposed that the optimal number of clusters is 2
+# while 7 algorithms proposed that the optimal number of clusters is 3.
+# Let's compare a quality of clusterings of 2 and 3 clusters
+
+# Visualize using factoextra
+# Cut in 2 groups and color by groups
+fviz_dend(res_hc, k = 2, # Cut in two groups
+          cex = 0.5, # Label size
+          palette = "jco",
+          color_labels_by_k = TRUE, # Colour labels by groups
+          rect = TRUE, # Add rectangle around groups
+          show_labels = FALSE
+          )
+
+# Cut in 3 groups and color by groups
+fviz_dend(res_hc, k = 3, # Cut in three groups
+          cex = 0.5, # label size
+          palette = "jco",
+          color_labels_by_k = TRUE, # Colour labels by groups
+          rect = TRUE, # Add rectangle around groups
+          show_labels = FALSE
+          )
+```
+
+
+```{r}
+set.seed(123)
+
+# Cut tree into 2 groups to extract the cluster membership of each observation
+cluster_id_2 <- cutree(res_hc, k = 2)
+cluster_id_2
+```
+
+```{r}
+set.seed(123)
+
+# Cut tree into 3 groups to extract the cluster membership of each observation
+cluster_id_3 <- cutree(res_hc, k = 3)
+cluster_id_3
+```
+
+```{r}
+set.seed(123)
+
+# Append cluster IDs to the iris dataset
+iris_cluster_df <- iris_cluster_df %>% 
+  as.data.frame() %>% 
+  mutate(
+    Species = iris$Species, # Now when we have performed clustering, lets include back `Species` column
+                            # in order to perform meaningful interpretation of discovered subgroups
+    cluster_id_2 = cluster_id_2,
+    cluster_id_3 = cluster_id_3
+  )
+
+iris_cluster_df
+```
+
+```{r}
+set.seed(123)
+# Inspect the quality of clustering for 2 clusters
+table(iris_cluster_df$cluster_id_2, iris_cluster_df$Species)
+
+# Inspect the quality of clustering for 3 clusters
+table(iris_cluster_df$cluster_id_3, iris_cluster_df$Species)
+
+# Comment your findings
+```
+
+## K-Means Clustering 
+
+```{r}
+set.seed(123)
+
+# Before performing clustering we need to make sure that 
+# all the variables are on the same scale
+iris_cluster_df <- iris
+
+# Select all columns except `Species`. 
+iris_cluster_df<- iris[, 1:4] 
+# `Species` column will be used to interpret clustering results (see the last step).
+
+# Perform data normalisation (centering and scaling)
+iris_cluster_df<-scale(iris_cluster_df) 
+
+head(iris_cluster_df)
+```
+
+```{r}
+set.seed(123)
+
+# Automatically detect optimal number of clusters using NbClust method
+# NbClust package provides 30 indices for determining the number of clusters 
+# and proposes to user the best clustering scheme from the different results obtained by 
+# varying all combinations of number of clusters, distance measures, and clustering methods.
+res_kmeans_automatic <- iris_cluster_df %>% 
+  NbClust(distance = "euclidean",
+          min.nc = 2, max.nc = 10, 
+          method = "kmeans", index ="all") 
+
+fviz_nbclust(res_kmeans_automatic, ggtheme = theme_minimal())
+
+```
+```{r}
+# Using the elbow method (Total Within Sum of Squares) we can see that
+# the optimal number of clusters is either 2 or 3, depending what the point is taken as the cut-off value
+fviz_nbclust(iris_cluster_df, kmeans, method = "wss")
+
+# Using the gap statistic we can see that the optimal number of clusters is 2
+fviz_nbclust(iris_cluster_df, kmeans, method = "gap_stat")
+```
+
+```{r}
+set.seed(123)
+
+# We can see that 11 algorithms proposed that the optimal number of clusters is 2
+# while 10 algorithms proposed that the optimal number of clusters is 3
+
+# Having in mind that it is almost tied, let's compare a quality of clustering for both k=2 and k=3
+res_kmeans_2 <- kmeans(iris_cluster_df, centers = 2, nstart = 25)
+res_kmeans_3 <- kmeans(iris_cluster_df, centers = 3, nstart = 25)
+
+```
+
+```{r}
+set.seed(123)
+
+# Centers of 2 clusters
+res_kmeans_2$centers
+
+# Centers of 3 clusters
+res_kmeans_3$centers
+
+# Append cluster IDs to the iris dataset
+iris_cluster_df <- iris_cluster_df %>% 
+  as.data.frame() %>% 
+  mutate(
+    Species = iris$Species, # Now when we have performed clustering, lets include back `Species` column
+                            # in order to perform meaningful interpretation of discovered subgroups
+    cluster_id_2 = res_kmeans_2$cluster,
+    cluster_id_3 = res_kmeans_3$cluster
+  )
+
+iris_cluster_df
+```
+```{r}
+set.seed(123)
+
+# Inspect the quality of clustering for 2 clusters
+table(iris_cluster_df$cluster_id_2, iris_cluster_df$Species)
+
+# Inspect the quality of clustering for 3 clusters
+table(iris_cluster_df$cluster_id_3, iris_cluster_df$Species)
+
+# Comment your findings, how would you interpret the clusters, how the quality of kmeans compares to HC?
+# Include in the comparison other types of HC algorithms with the linkage methods other than the Ward's and
+# and the dissimilarity metrics other than the Euclidean
+```
+
+## Additional Example
+
+Hierarchical Clustering (Complete linkage, Manhattan distances). NOTE: Hierarchical clustering using other linkage and distance criteria is performed similarly.
+
+```{r}
+set.seed(123)
+
+# Before performing clustering we need to make sure that 
+# all the variables are on the same scale
+iris_cluster_df <- iris
+
+# Select all columns except `Species`. 
+iris_cluster_df<- iris[, 1:4] 
+# `Species` column will be used to interpret clustering results (see the last step).
+
+# Perform data normalisation (centering and scaling)
+iris_cluster_df<-scale(iris_cluster_df) 
+
+head(iris_cluster_df)
+head(iris_cluster_df)
+
+# Compute the dissimilarity matrix 
+res_dist <- dist(iris_cluster_df, method = "manhattan") # Method: euclidean, manhattan, binary
+
+# Linkage
+res_hc <- hclust(d = res_dist, method = "complete") # method: "single", "complete", "average", "centroid"
+
+# Dendogram
+fviz_dend(res_hc, cex = 0.5)
+
+# Automatically detect optimal number of clusters using NbClust method
+# NbClust package provides 30 indices for determining the number of clusters 
+# and proposes to user the best clustering scheme from the different results obtained by 
+# varying all combinations of number of clusters, distance measures, and clustering methods.
+res_hc_automatic <- iris_cluster_df %>% 
+  NbClust(distance = "manhattan",
+            min.nc = 2, max.nc = 10, 
+            method = "complete", index ="all") 
+
+# We can see that majority of 18 algorithms proposed that the optimal number of clusters is 3
+fviz_nbclust(res_hc_automatic, ggtheme = theme_minimal())
+
+# Cut in 3 groups and color by groups
+fviz_dend(res_hc, k = 3, # Cut in three groups
+          cex = 0.5, # Label size
+          palette = "jco",
+          color_labels_by_k = TRUE, # Color labels by groups
+          rect = TRUE, # Add rectangle around groups
+          show_labels = FALSE
+          )
+
+# Cut tree into 3 groups to extract the cluster membership of each observation
+cluster_id_3 <- cutree(res_hc, k = 3)
+
+# Append cluster IDs to the iris dataset
+iris_cluster_df <- iris_cluster_df %>% 
+  as.data.frame() %>% 
+  mutate(
+    Species = iris$Species, # now when we have performed clustering, lets include back `Species` column
+                            # in order to perform meaninful interpretation of discovered subgroups
+    cluster_id_3 = cluster_id_3
+  )
+
+# Inspect the quality of clustering for 3 clusters
+table(iris_cluster_df$cluster_id_3, iris_cluster_df$Species)
+
+# Comment your findings
+
+```
