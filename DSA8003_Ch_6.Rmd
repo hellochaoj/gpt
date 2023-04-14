@@ -1,0 +1,331 @@
+---
+title: "DSA8003 - Chapter 6"
+output: 
+  html_notebook:
+    toc: true
+    toc_float: true
+---
+```{r include=FALSE}
+if(!require(naivebayes)) install.packages("naivebayes")
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(skimr)) install.packages("skimr")
+if(!require(FactoMineR)) install.packages("FactoMineR")
+if(!require(factoextra)) install.packages("factoextra")
+if(!require(mlbench)) install.packages("mlbench") # contains various datasets
+if(!require(ISLR)) install.packages("ISLR") # contains various datasets
+if(!require(caret)) install.packages("caret")
+if(!require(caretEnsemble)) install.packages("caretEnsemble")
+if(!require(RANN)) install.packages("RANN")
+if(!require(caTools)) install.packages("caTools")
+if(!require(rpart)) install.packages("rpart")
+if(!require(rpart.plot)) install.packages("rpart.plot")
+if(!require(ranger)) install.packages("ranger")
+if(!require(e1071)) install.packages("e1071")
+if(!require(arules)) install.packages("arules")
+if(!require(arulesViz)) install.packages("arulesViz")
+if(!require(mice)) install.packages("mice")
+if(!require(NbClust)) install.packages("NbClust")
+
+library(naivebayes)
+library(tidyverse)
+library(skimr)
+library(FactoMineR)
+library(factoextra)
+library(mlbench)
+library(caret)
+library(caretEnsemble)
+library(RANN)
+library(caTools)
+library(rpart)
+library(rpart.plot)
+library(ranger)
+library(e1071)
+library(arules)
+library(arulesViz)
+library(mice)
+library(NbClust)
+
+
+```
+
+# Supervised Learning (Regression)
+
+## Data
+
+For demonstrating how the supervised learning techniques work for Regression, we will be using the dataset: `Boston`.
+
+A description of the **Boston** dataset:
+
+_Housing data for 506 census tracts of Boston from the 1970 census. _
+
+We want to train supervised model to predict house median value of owner-occupied homes (`medv` variable) using the remaining variables as the predictors.
+
+Let's simulate the real world scenario in which there are 2 datasets: 
+
+* `boston_train` - consists of 80% randomly selected `BostonHousing` observations. By relying on **5-fold cross validation (CV)**, we will use this dataset to train various classification models and tune their hyperparameters.
+* `boston_test` - consists of remaining 20% `BostonHousing` observations. We will use this dataset to mimic real world conditions and test generalisation performances of our models
+
+
+```{r}
+set.seed(123)
+
+data("BostonHousing")
+boston_copy <- BostonHousing
+
+# Inspect the dataset
+head(boston_copy)
+skim(boston_copy) 
+# What can you say about this dataset?
+# We can see that there are no missing observations in the dataset, so we do not need to perform missing data imputation
+
+# To simulate the real word scenario, create the train and the test sets 
+# The train set should be consisted of 80% of randomly selected observations
+# The test set should be consisted of the remaining 20%
+in_train <- createDataPartition(boston_copy$medv, p = 0.8, list = FALSE) 
+# Remember this is from the CARET package for creating train/test partitions by returning indexes of observations that should be included in the train set
+
+boston_train <- boston_copy[in_train, ]
+boston_test <- boston_copy[-in_train, ]
+
+# Let's separate predictors from the response variable (`medv` is our response variable)
+boston_x <- boston_train %>% 
+  select(-medv) 
+
+boston_y <- boston_train %>% 
+  select(medv) %>% 
+  pull()
+
+# Double check whether the correct variables are selected
+# NOTE: if there is ID variable in the predictor dataset, make sure that you remove it as well
+#       (there is no such variable in the Boston dataset, so no extra removal is required)
+head(boston_x)
+head(boston_y)
+
+
+# Create train/test indexes which will be used in 5-Fold CV
+myFolds_regression <- createFolds(boston_y, k = 5)
+
+# Inspect myFold indexes
+myFolds_regression
+
+# Create unique configuration which will be shared across all regression models 
+ctrl_regression <- trainControl(
+  method = "cv", # Used for configuring resampling method: in this case cross validation 
+  number = 5, # Instruct that it is 5 fold-cv
+  index = myFolds_regression, # Folds' indexes
+  verboseIter = TRUE, # Print output of each step
+  savePredictions = TRUE, 
+  preProcOptions = list(thresh = 0.8) 
+  
+  # In case that PCA preprocessing option is selected in the train() function
+  # Indicates a cutoff for the cumulative percent of variance to be retained by PCA
+)
+
+```
+
+
+## Linear regression
+
+```{r}
+set.seed(123)
+
+# Perform data-preprocessing step which will perform data centering & scaling and remove variables with zero variance
+# Train LM model using default CARET parameters
+# As the best parameter selects the one for which the model has the lowest RMSE score
+model_lm_boston_default <- train(
+  x = boston_x, # Predictors dataset
+  y = boston_y, # Response variable
+  method = "lm", # ML algorithm: rpart, knn, nb, ranger, glm, lm, etc. 
+  trControl = ctrl_regression, # Training configuration
+  preProcess = c("zv", "center", "scale") # zv - remove predictors with zero variance
+                                          # center, scale - centering and scaling data 
+)
+
+# Model summary
+model_lm_boston_default
+
+# Inspect the variable importance, in the default LM model
+plot(varImp(model_lm_boston_default))
+
+# Get LM coefficients of the final model
+summary(model_lm_boston_default$finalModel)
+
+# We will also use PCA dimensionality reduction technique to retain as many PCs is required 
+# to account for over 80% of the overall variability in the dataset
+model_lm_boston_pca <- train(
+  x = boston_x, # Predictors dataset
+  y = boston_y, # Response variable
+  method = "lm", # ML algorithm: rpart, knn, nb, ranger, glm, lm, etc. 
+  trControl = ctrl_regression, # training configuration
+  preProcess = c("zv", "center", "scale", "pca") # zv - remove predictors with zero variance
+                                          # center, scale - centering and scaling data 
+                                          # pca - perform PCA transformation on input dataset (retain only those PCs that explain 80% variance)
+)
+
+# Model summary
+model_lm_boston_pca
+
+# Inspect the variable importance, in the default LM model
+plot(varImp(model_lm_boston_pca))
+
+# Get LM coefficients of the final model
+summary(model_lm_boston_pca$finalModel)
+
+# Let's compare the performance of these 2 models
+# Comment your findings
+lm_boston_resample <- resamples(
+  list(
+    lm_default = model_lm_boston_default,
+    lm_pca = model_lm_boston_pca
+  )
+)
+
+summary(lm_boston_resample)
+
+dotplot(lm_boston_resample)
+bwplot(lm_boston_resample)
+```
+
+## Random Forests
+
+```{r}
+set.seed(123)
+
+# The list of configuration parameters for the ranger model: 
+modelLookup("ranger")
+
+# Perform data-preprocessing step which will perform data centering & scaling and remove variables with zero variance
+# Train RANGER model using default CARET parametres
+model_ranger_boston_default <- train(
+  x = boston_x, # Predictors dataset
+  y = boston_y, # Response variable
+  method = "ranger", # ML algorithm: rpart, knn, nb, ranger, glm, lm, etc. 
+  trControl = ctrl_regression, # Training configuration
+  importance = "impurity", # This needs to be added only for `ranger` for identifying variable importance
+  preProcess = c("zv", "center", "scale") # zv - remove predictors with zero variance
+                                          # center, scale - centering and scaling data 
+)
+
+# Model summary
+model_ranger_boston_default
+
+# The best tuning parameter(s)
+model_ranger_boston_default$bestTune
+
+# Having in mind that there is only 13 predictor variables in the boston_train dataset
+# we cannot use tuneLength = 20 that we used in previous examples and instead we should choose some numbebr that is <= 13
+model_ranger_boston_auto <- train(
+  x = boston_x, # Predictors dataset
+  y = boston_y, # Response variable
+  method = "ranger", # ML algorithm: rpart, knn, nb, ranger, glm, lm, etc. 
+  trControl = ctrl_regression, # Training configuration
+  importance = "impurity", # This needs to be added only for `ranger` for identifying variable importance
+  tuneLength = 5, # CARET's random selection of tuning parametres
+  # tuneGrid = expand.grid()
+  preProcess = c("zv", "center", "scale") # zv - remove predictors with zero variance
+                                          # center, scale - centering and scaling data 
+)
+
+# Model summary
+model_ranger_boston_auto
+
+# The best tuning parameter(s)
+model_ranger_boston_auto$bestTune
+
+# We can see that the model `model_ranger_boston_default` performs better than the model `model_ranger_boston_auto`
+model_ranger_boston_default$results[which.min(model_ranger_boston_default$results$RMSE), ] 
+# Select the one with min RMSE!
+model_ranger_boston_auto$results[which.min(model_ranger_boston_auto$results$RMSE), ]
+
+# Inspect the impact of different hyperparametres settings on predictive performances of these two models
+plot(model_ranger_boston_default)
+plot(model_ranger_boston_auto)
+
+# Inspect the variable importance, in the `model_ranger_boston_default` model
+plot(varImp(model_ranger_boston_default))
+
+# From the summary output, we can see that the model `model_ranger_default` has the best performance
+# We can also see that the lowest RMSE scores are obtained for mtry = 13
+# As not all mtry numbers are considered, let's instruct CARET to use 2 <= mtry <= 13, 
+# and select the one for which the model has the lowest RMSE score
+model_ranger_boston_manual <- train(
+  x = boston_x, # Predictors dataset
+  y = boston_y, # Response variable
+  method = "ranger", # ML algorithm: rpart, knn, nb, ranger, glm, lm, etc. 
+  trControl = ctrl_regression, # Training configuration
+  importance = "impurity", # This needs to be added only for `ranger` for identifying variable importance
+  tuneGrid = expand.grid(
+    mtry = 2:13,
+    splitrule = c("variance", "extratrees"),
+    min.node.size = 5 # see documentation: min.node.size = 5 for regression and min.node.size = 1 for classification
+  ),
+  preProcess = c("zv", "center", "scale") # zv - remove predictors with zero variance
+                                          # center, scale - centering and scaling data 
+)
+
+
+# Model summary
+model_ranger_boston_manual
+
+# The optimal hyperparameter value(s)
+model_ranger_boston_manual$bestTune
+
+# Inspect the impact of different hyperparameter settings on predictive perforormances of the model
+plot(model_ranger_boston_manual)
+
+
+# Let's compare the performance of these 3 models
+# Comment your findings
+ranger_boston_resample <- resamples(
+  list(
+    ranger_default = model_ranger_boston_default,
+    ranger_auto = model_ranger_boston_auto,
+    ranger_manual = model_ranger_boston_manual
+  )
+)
+
+summary(ranger_boston_resample)
+
+dotplot(ranger_boston_resample)
+bwplot(ranger_boston_resample)
+```
+
+## Performance comparison
+
+```{r}
+all_models_boston_resample <- resamples(
+  list(
+    lm_default = model_lm_boston_default,
+    lm_pca = model_lm_boston_pca,
+    ranger_default = model_ranger_boston_default,
+    ranger_auto = model_ranger_boston_auto,
+    ranger_manual = model_ranger_boston_manual
+  )
+)
+
+# We can see that the `model_ranger_boston_auto` model has the best predictive performance
+summary(all_models_boston_resample)
+dotplot(all_models_boston_resample)
+bwplot(all_models_boston_resample)
+
+# Let's inspect its generalisation performance using the boston_test dataset
+ranger_boston_preds <- predict(model_ranger_boston_auto, newdata = select(boston_test, -medv))
+
+# Calculate RMSE
+RMSE(pred = ranger_boston_preds, obs = boston_test$medv)
+
+# Calculate R^2
+R2(pred = ranger_boston_preds, obs = select(boston_test, medv))
+
+# Plot the observed dataset against the predicted ones
+# black line = observed
+# red line = predicted
+data.frame(
+  id = 1:length(boston_test$medv),
+  observed = boston_test$medv,
+  predicted = ranger_boston_preds
+) %>% 
+  ggplot() +
+  geom_line(aes(x = id, y = observed)) +
+  geom_line(aes(x = id, y = predicted), colour = "red")
+```
